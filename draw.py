@@ -1,146 +1,176 @@
 #!/usr/bin/env python3
-"""Render entry.png for make.fun news-image-20261118.
+"""Draw the 18 November 2026 world-news infographic as a 1024x1024 PNG.
 
-Infographic: Wednesday 18 November 2026 world news, five verified stories.
-Deterministic PIL render (fixed fonts, fixed layout, no clock, no random).
-Run: python3 draw.py [output_path]  (default: entry.png next to this file)
+Writes entry.png next to this file. One dark-navy page: a centred header,
+five numbered story cards with a coloured accent each, and a sources footer.
 """
+
 import os
-import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 1024, 1024
-BG = (11, 20, 36)
-CARD_BG = (20, 33, 58)
-CARD_BORDER = (34, 52, 90)
-WHITE = (245, 247, 250)
-MUTED = (168, 182, 205)
-FOOTER = (138, 154, 181)
-TITLE = (255, 255, 255)
-SUBHEAD = (150, 196, 255)
+SIZE = 1024
+MARGIN = 36
+CARD_LEFT = MARGIN
+CARD_RIGHT = SIZE - MARGIN
+CARD_TOP = 152
+CARD_HEIGHT = 150
+CARD_GAP = 12
 
-FONT_DIR = "/usr/share/fonts/truetype/noto"
-BOLD = os.path.join(FONT_DIR, "NotoSans-Bold.ttf")
-REG = os.path.join(FONT_DIR, "NotoSans-Regular.ttf")
+BG = (11, 18, 38)
+CARD_BG = (27, 39, 68)
+TITLE = (255, 255, 255)
+SUBTITLE = (140, 175, 230)
+DIVIDER = (52, 68, 104)
+HEADLINE = (255, 255, 255)
+BODY = (198, 209, 228)
+FOOTER = (139, 150, 176)
+BADGE_TEXT = (255, 255, 255)
 
 STORIES = [
-    ("IRAN STRIKES KUWAIT AND BAHRAIN",
-     "Iran struck Ali Al Salem Air Base in Kuwait, home to US forces, and "
-     "targets in Bahrain — a day after US warplanes hit an Iranian missile "
-     "site on Qeshm Island.",
-     (229, 72, 77)),
-    ("XI AND PUTIN MEET IN SHENZHEN",
-     "Xi Jinping and Vladimir Putin met in Shenzhen on the sidelines of the "
-     "APEC summit, ahead of a trilateral meeting with Donald Trump set for "
-     "19 November.",
-     (76, 154, 255)),
-    ("PELTOLA WINS ALASKA SENATE SEAT",
-     "Democrat Mary Peltola won Alaska's US Senate seat, giving Democrats a "
-     "56–44 majority in the Senate.",
-     (245, 165, 36)),
-    ("EBOLA IN DR CONGO PASSES 11,000",
-     "The Ebola outbreak in DR Congo passed 11,000 cases, the second-largest "
-     "on record, with children bearing the heaviest toll.",
-     (63, 178, 127)),
-    ("VOYAGER 1 REACHES ONE LIGHT-DAY",
-     "NASA's Voyager 1 reached one light-day from Earth — about 16 billion "
-     "miles — a distance no human-made object has crossed before.",
-     (155, 126, 222)),
+    (
+        "IRAN STRIKES KUWAIT AND BAHRAIN",
+        "Iran struck Ali Al Salem Air Base in Kuwait, home to US forces, "
+        "and targets in Bahrain \u2014 a day after US warplanes hit an "
+        "Iranian missile site on Qeshm Island.",
+        (229, 72, 77),
+    ),
+    (
+        "XI AND PUTIN MEET IN SHENZHEN",
+        "Xi Jinping and Vladimir Putin met in Shenzhen on the sidelines "
+        "of the APEC summit, ahead of a trilateral meeting with Donald "
+        "Trump set for 19 November.",
+        (74, 144, 226),
+    ),
+    (
+        "PELTOLA WINS ALASKA SENATE SEAT",
+        "Democrat Mary Peltola won Alaska's US Senate seat, giving "
+        "Democrats a 56-44 majority in the Senate.",
+        (245, 166, 35),
+    ),
+    (
+        "EBOLA IN DR CONGO PASSES 11,000",
+        "The Ebola outbreak in DR Congo passed 11,000 cases, the "
+        "second-largest on record, with children bearing the heaviest toll.",
+        (63, 185, 127),
+    ),
+    (
+        "VOYAGER 1 REACHES ONE LIGHT-DAY",
+        "NASA's Voyager 1 reached one light-day from Earth \u2014 about 16 "
+        "billion miles \u2014 a distance no human-made object has crossed before.",
+        (155, 126, 222),
+    ),
 ]
 
-
-def font(path, size):
-    return ImageFont.truetype(path, size)
-
-
-def fit_one_line(draw, text, path, start_size, max_w, min_size=28):
-    """Largest font size (<= start_size) that fits text on one line."""
-    size = start_size
-    while size > min_size:
-        f = font(path, size)
-        if draw.textlength(text, font=f) <= max_w:
-            return f
-        size -= 1
-    return font(path, min_size)
+FOOTER_TEXT = (
+    "Sources: Just Security, Open Chronicle, Zark News, OneTurn, Horizon "
+    "\u2014 18 November 2026"
+)
 
 
-def wrap(draw, text, f, max_w):
-    """Greedy word wrap to max_w pixels; returns list of lines."""
-    words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if draw.textlength(trial, font=f) <= max_w:
-            cur = trial
+def load_font(bold, size):
+    """Try the common system sans fonts, falling back to PIL's default."""
+    if bold:
+        names = ["DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"]
+    else:
+        names = ["DejaVuSans.ttf", "LiberationSans-Regular.ttf"]
+    for name in names:
+        for folder in ("/usr/share/fonts/truetype/dejavu",
+                       "/usr/share/fonts/truetype/liberation"):
+            path = os.path.join(folder, name)
+            if os.path.isfile(path):
+                try:
+                    return ImageFont.truetype(path, size)
+                except OSError:
+                    continue
+    return ImageFont.load_default()
+
+
+def wrap_text(draw, text, font, max_width):
+    """Greedy word wrap using the font's real text lengths."""
+    lines = []
+    current = ""
+    for word in text.split():
+        trial = word if not current else current + " " + word
+        if draw.textlength(trial, font=font) <= max_width:
+            current = trial
         else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "entry.png")
-    img = Image.new("RGB", (W, H), BG)
-    d = ImageDraw.Draw(img)
-
-    # ---- header ----
+def draw_header(draw):
+    title_font = load_font(True, 46)
+    sub_font = load_font(False, 29)
     title = "WEDNESDAY, 18 NOVEMBER 2026"
-    tf = fit_one_line(d, title, BOLD, 56, W - 64)
-    d.text((W / 2, 30), title, font=tf, fill=TITLE, anchor="ma")
-    sf = font(REG, 28)
-    d.text((W / 2, 102), "World News in One Image", font=sf,
-           fill=SUBHEAD, anchor="ma")
-    d.line([(64, 148), (W - 64, 148)], fill=CARD_BORDER, width=2)
+    subtitle = "World News in One Image"
+    title_x = (SIZE - draw.textlength(title, font=title_font)) / 2
+    draw.text((title_x, 26), title, font=title_font, fill=TITLE)
+    sub_x = (SIZE - draw.textlength(subtitle, font=sub_font)) / 2
+    draw.text((sub_x, 92), subtitle, font=sub_font, fill=SUBTITLE)
+    draw.line([(MARGIN, 138), (SIZE - MARGIN, 138)], fill=DIVIDER, width=2)
 
-    # ---- story cards ----
-    card_x, card_w = 32, W - 64
-    card_h, gap, y = 156, 10, 162
-    for i, (headline, body, accent) in enumerate(STORIES, 1):
-        top = y + (i - 1) * (card_h + gap)
-        # card background + accent bar
-        d.rounded_rectangle([card_x, top, card_x + card_w, top + card_h],
-                            radius=14, fill=CARD_BG, outline=CARD_BORDER,
-                            width=1)
-        d.rounded_rectangle([card_x, top, card_x + 10, top + card_h],
-                            radius=5, fill=accent)
-        # number circle
-        cx, cy = card_x + 38, top + 34
-        d.ellipse([cx - 20, cy - 20, cx + 20, cy + 20], fill=accent)
-        nf = font(BOLD, 26)
-        d.text((cx, cy), str(i), font=nf, fill=(255, 255, 255),
-               anchor="mm")
-        # headline (one line, shrink to fit)
-        tx = card_x + 72
-        max_text_w = card_x + card_w - 24 - tx
-        hf = fit_one_line(d, headline, BOLD, 40, max_text_w, min_size=30)
-        d.text((tx, top + 14), headline, font=hf, fill=WHITE, anchor="la")
-        # body (wrap, max 3 lines; shrink if needed)
-        bf = font(REG, 25)
-        lines = wrap(d, body, bf, max_text_w)
-        if len(lines) > 3:
-            bf = font(REG, 23)
-            lines = wrap(d, body, bf, max_text_w)
-        assert len(lines) <= 3, f"story {i} needs {len(lines)} lines"
-        by = top + 66
-        for ln in lines:
-            d.text((tx, by), ln, font=bf, fill=MUTED, anchor="la")
-            by += 31
-        print(f"card {i}: headline size {hf.size}, body lines {len(lines)}")
 
-    # ---- footer ----
-    ff = font(REG, 19)
-    d.text((W / 2, 990),
-           "Sources: Just Security, Open Chronicle, Zark News, OneTurn, "
-           "Horizon — 18 November 2026",
-           font=ff, fill=FOOTER, anchor="ma")
+def draw_card(draw, index, headline, body, accent, top):
+    bottom = top + CARD_HEIGHT
+    draw.rounded_rectangle(
+        [CARD_LEFT, top, CARD_RIGHT, bottom], radius=16, fill=CARD_BG
+    )
+    # Thin coloured bar hugging the card's left edge.
+    draw.rounded_rectangle(
+        [CARD_LEFT + 2, top + 10, CARD_LEFT + 14, bottom - 10],
+        radius=6,
+        fill=accent,
+    )
+    # Numbered disc above the headline's left side.
+    badge_cx = CARD_LEFT + 52
+    badge_cy = top + 30
+    badge_r = 21
+    draw.ellipse(
+        [badge_cx - badge_r, badge_cy - badge_r,
+         badge_cx + badge_r, badge_cy + badge_r],
+        fill=accent,
+    )
+    number_font = load_font(True, 26)
+    draw.text(
+        (badge_cx, badge_cy), str(index + 1),
+        font=number_font, fill=BADGE_TEXT, anchor="mm",
+    )
+    text_x = CARD_LEFT + 92
+    headline_font = load_font(True, 32)
+    draw.text((text_x, top + 14), headline, font=headline_font, fill=HEADLINE)
+    body_font = load_font(False, 22)
+    max_width = CARD_RIGHT - text_x - 24
+    lines = wrap_text(draw, body, body_font, max_width)
+    line_y = top + 58
+    for line in lines:
+        draw.text((text_x, line_y), line, font=body_font, fill=BODY)
+        line_y += 28
 
-    img.save(out, format="PNG")
-    print("saved", out, os.path.getsize(out), "bytes")
+
+def draw_footer(draw):
+    footer_font = load_font(False, 20)
+    footer_x = (SIZE - draw.textlength(FOOTER_TEXT, font=footer_font)) / 2
+    draw.text((footer_x, 968), FOOTER_TEXT, font=footer_font, fill=FOOTER)
+
+
+def main():
+    image = Image.new("RGB", (SIZE, SIZE), BG)
+    draw = ImageDraw.Draw(image)
+    draw_header(draw)
+    top = CARD_TOP
+    for index, (headline, body, accent) in enumerate(STORIES):
+        draw_card(draw, index, headline, body, accent, top)
+        top += CARD_HEIGHT + CARD_GAP
+    draw_footer(draw)
+    here = os.path.dirname(os.path.abspath(__file__))
+    out_path = os.path.join(here, "entry.png")
+    image.save(out_path, "PNG")
+    print(f"wrote {out_path} ({os.path.getsize(out_path)} bytes)")
 
 
 if __name__ == "__main__":

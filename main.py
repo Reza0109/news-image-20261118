@@ -1,59 +1,75 @@
 #!/usr/bin/env python3
-"""Entry point for make.fun news-image-20261118.
+"""Copy entry.png into the make.fun output directory after validating it.
 
-Copies the pre-rendered entry.png (shipped in this repo) to the output
-directory, then verifies the copy landed intact: the source must be a
-real PNG of at most 1024x1024 pixels, and the destination must exist,
-start with the PNG magic bytes, and match the source's byte size exactly.
-Standard library only: no network, no randomness, no clock, so repeated
-runs produce byte-identical output.
+Standard library only. Expects MAKEFUN_OUTPUT_DIR to be set. The source
+must be a real PNG of at most 1024x1024, and the copy is verified by
+comparing byte sizes afterwards.
 """
+
 import os
 import shutil
 import struct
+import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+PNG_IEND = b"\x00\x00\x00\x00IEND"
+MAX_WIDTH = 1024
+MAX_HEIGHT = 1024
+MAX_BYTES = 1048576
 
 
-def png_dimensions(path):
-    """Read (width, height) from a PNG's IHDR chunk; None if not a PNG."""
-    with open(path, "rb") as f:
-        header = f.read(33)
-    if len(header) < 33 or header[:8] != PNG_MAGIC:
-        return None
+def fail(message):
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def read_png_size(path):
+    """Return (width, height) of a PNG, failing unless magic and IHDR check out."""
+    with open(path, "rb") as handle:
+        header = handle.read(33)
+    if len(header) < 33:
+        fail(f"{path} is too short to be a PNG file")
+    if header[:8] != PNG_MAGIC:
+        fail(f"{path} is not a PNG file (bad magic bytes)")
     if header[12:16] != b"IHDR":
-        return None
+        fail(f"{path} has no IHDR chunk where one is expected")
     width, height = struct.unpack(">II", header[16:24])
     return width, height
 
 
+def check_png_complete(path):
+    """Fail unless the file ends with a proper IEND chunk."""
+    with open(path, "rb") as handle:
+        handle.seek(-12, os.SEEK_END)
+        tail = handle.read(12)
+    if len(tail) < 12 or tail[:8] != PNG_IEND:
+        fail(f"{path} is truncated: no IEND chunk at the end")
+
+
 def main():
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    os.makedirs(out_dir, exist_ok=True)
-    src = os.path.join(HERE, "entry.png")
-    if not os.path.isfile(src):
-        raise SystemExit("entry.png missing from the repository: %s" % src)
-    dims = png_dimensions(src)
-    if dims is None:
-        raise SystemExit("entry.png is not a valid PNG: %s" % src)
-    if dims[0] > 1024 or dims[1] > 1024:
-        raise SystemExit(
-            "entry.png too large: %dx%d, max 1024x1024" % dims)
-    dst = os.path.join(out_dir, "entry.png")
-    shutil.copyfile(src, dst)
-    expected = os.path.getsize(src)
-    if not os.path.isfile(dst):
-        raise SystemExit("output entry.png was not created: %s" % dst)
-    with open(dst, "rb") as f:
-        if f.read(8) != PNG_MAGIC:
-            raise SystemExit("output entry.png is not a valid PNG: %s" % dst)
-    actual = os.path.getsize(dst)
-    if actual != expected:
-        raise SystemExit(
-            "output entry.png size mismatch: expected %d bytes, got %d"
-            % (expected, actual)
+    here = os.path.dirname(os.path.abspath(__file__))
+    source = os.path.join(here, "entry.png")
+    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR")
+    if not out_dir:
+        fail("MAKEFUN_OUTPUT_DIR is not set")
+    if not os.path.isfile(source):
+        fail(f"source image not found: {source}")
+    width, height = read_png_size(source)
+    if width > MAX_WIDTH or height > MAX_HEIGHT:
+        fail(f"image is {width}x{height}, larger than {MAX_WIDTH}x{MAX_HEIGHT}")
+    if os.path.getsize(source) > MAX_BYTES:
+        fail(f"image is larger than 1 MiB ({os.path.getsize(source)} bytes)")
+    check_png_complete(source)
+    destination = os.path.join(out_dir, "entry.png")
+    shutil.copyfile(source, destination)
+    src_size = os.path.getsize(source)
+    dst_size = os.path.getsize(destination)
+    if src_size != dst_size:
+        fail(
+            f"copy size mismatch: source {src_size} bytes, "
+            f"destination {dst_size} bytes"
         )
+    print(f"copied entry.png ({width}x{height}, {src_size} bytes) to {destination}")
 
 
 if __name__ == "__main__":
